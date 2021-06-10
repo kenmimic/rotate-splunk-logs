@@ -46,7 +46,7 @@ def authenticate():
   client = paramiko.SSHClient()
 #  client.load_host_keys(os.path.expanduser('~/.ssh/known_hosts'))
   client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-  display(f'\t[ initial ssh connection ]')
+  display(f'\t[+] initial ssh connection')
   client.connect(args.splunkIp, username=args.username, pkey=key) 
 #  client.connect(args.splunkIp, username=args.username, password=str(args.password))
   display(f'\t[ splunk instance connected ]')
