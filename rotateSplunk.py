@@ -49,7 +49,7 @@ def authenticate():
   display(f'\t[+] initial ssh connection')
   client.connect(args.splunkIp, username=args.username, pkey=key) 
 #  client.connect(args.splunkIp, username=args.username, password=str(args.password))
-  display(f'\t[ splunk instance connected ]')
+  display(f'\t[+] splunk instance connected')
   return client
 
 def display(msg):
