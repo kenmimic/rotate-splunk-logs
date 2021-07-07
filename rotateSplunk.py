@@ -1,4 +1,4 @@
-#!/bin/python
+#!/bin/python3
 from paramiko import SSHClient
 import argparse
 import getpass
@@ -6,6 +6,7 @@ import os,subprocess
 import configparser
 from pathlib import Path
 import time
+import re
 
 class Password:
   DEFAULT = 'Prompt if not secify'
@@ -19,20 +20,22 @@ class Password:
 class splunkConfig:
   localConfigFile = "/home/pi/indexes.conf"
   #localConfigFile = "/data/splunk/etc/system/local/indexes.conf"
-  rotatePeriodInSecs = 60
+  thawedPath = "/tmp/splunk-old-index-archives-data/"
+  #coldToFrozenDir = "/tmp/splunk-old-index-archives-data/"
   coldToFrozenScript = "$SPLUNK_HOME/bin/coldToFrozenExample.py"
   coldToFrozenDir = "/tmp/heartwise/"
-  #coldToFrozenDir = "/tmp/splunk-old-index-archives-data/"
-  frozenTimePeriodInSecs = 94608000
-  maxTotalDataSizeMB = 250000
+  frozenTimePeriodInSecs = 31449600
+  maxTotalDataSizeMB = 200000
+  rotatePeriodInSecs = 60
 
   def __init__(self, rotatePeriodInSecs, coldToFrozenScript,\
-               coldToFrozenDir, frozenTimePeriodInSecs, maxTotalDataSizeMB):
+               coldToFrozenDir, frozenTimePeriodInSecs, maxTotalDataSizeMB, thawedPath):
     self.localConfigFile = localConfigFile
     self.rotationPeriodInSecs = rotatePeriodInSecs
     self.coldToFrozenScript = coldToFrozenScript
     self.frozenTimePeriodInSecs = frozenTimePeriodInSecs
     self.maxTotalDataSizeMB = maxTotalDataSizeMB
+    self.thawedPath = thawedPath
 
 parser = argparse.ArgumentParser()
 parser.add_argument('-u', '--username', type=str, help='ssh username', required=True)
@@ -46,85 +49,102 @@ def authenticate():
   client = paramiko.SSHClient()
 #  client.load_host_keys(os.path.expanduser('~/.ssh/known_hosts'))
   client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-  display(f'\t[+] initial ssh connection')
+  display(f'[ initial ssh connection ]')
   client.connect(args.splunkIp, username=args.username, pkey=key) 
 #  client.connect(args.splunkIp, username=args.username, password=str(args.password))
-  display(f'\t[+] splunk instance connected')
+  display(f'[ splunk instance connected ]')
   return client
 
 def display(msg):
   time.sleep(1)
-  print(msg)
+  print('\t'+msg)
 
 def addToRemoteConfig():
   config = configparser.ConfigParser()
   config['main'] = {}
   config['main']['coldToFrozenScript'] = splunkConfig.coldToFrozenScript
   config['main']['coldToFrozenDir'] = splunkConfig.coldToFrozenDir
+  config['main']['thawedPath'] = splunkConfig.thawedPath
   config['main']['frozenTimePeriodInSecs'] = str(splunkConfig.frozenTimePeriodInSecs)
   config['main']['maxTotalDataSizeMB'] = str(splunkConfig.maxTotalDataSizeMB)
   config['main']['rotatePeriodInSecs'] = str(splunkConfig.rotatePeriodInSecs)
   with open('./local.indexes.conf','w') as configfile:
     config.write(configfile)
   configfile.close()
-  display("\t[ local.indexes.conf created ]")
+  display("[ local.indexes.conf created ]")
 
 def pullRemoteConfig():
-  display(f'\t[ Pulling Splunk Rotate Configuration ]')
-  #print(f'\t[ Pulling Splunk Rotate Configuration ]')
+  display(f'[ Pulling Splunk Rotate Configuration ]')
+  #print(f'[ Pulling Splunk Rotate Configuration ]')
   import subprocess
   try:
     stdout = subprocess.check_output(['scp',\
          args.username+"@"+args.splunkIp+":"+splunkConfig.localConfigFile,'./'])
     
     if stdout.decode("utf8") == '':
-      display("\t[ Remote config pulled ]")
+      display("[ Remote config pulled ]")
       return
   except subprocess.CalledProcessError as e:
-    display("\t[ No Remote config Found, adding Config ]")
+    display("[ No Remote config Found, adding Config ]")
     return False
     #pass
     
 def checkRemoteConfig():
   config = configparser.ConfigParser()
   config.sections()
-  display("\tLoad {}".format(splunkConfig.localConfigFile))
+  display("Load {}".format(splunkConfig.localConfigFile))
   config.read('indexes.conf')  
+  configNumbers=[]
   for setting in config['main']:
     display(setting+" = "+config['main'][setting])
-  if config['main']['coldtofrozenscript'] == splunkConfig.coldToFrozenScript:
-    display('\t[ cold To Frozen Script OK ]')
+  for key in splunkConfig.__dict__.keys():
+    key = re.sub(r"(^\_.*)","",key)
+    configNumbers.append(key)
+  #print(len(' '.join(configNumbers).split())-1)
+  display('[ Remote_Config Count: {} ]'.format(len(config['main'])))
+  display('[ default Config Conunt: {} ]'.format(len(' '.join(configNumbers).split())-1))
+  if len(config['main']) == len(' '.join(configNumbers).split())-1:
+    display('[ Config matched and number OK]')
   else:
-    display('\t[ Error cold To Frozen Script ]')
+    return False
+  if config['main']['coldtofrozenscript'] == splunkConfig.coldToFrozenScript:
+    display('[ cold To Frozen Script OK ]')
+  else:
+    display('[ Error cold To Frozen Script ]')
     return False
   if config['main']['coldtofrozendir'] == splunkConfig.coldToFrozenDir:
-    display('\t[ cold To Frozen Dir OK ]')
+    display('[ cold To Frozen Dir OK ]')
   else:
-    display('\t[ Error cold To Frozen Dir ]')
+    display('[ Error cold To Frozen Dir ]')
     return False
   if config['main']['frozentimeperiodinsecs'] == str(splunkConfig.frozenTimePeriodInSecs):
-    display('\t[ frozen time period in secs OK ]')
+    display('[ frozen time period in secs OK ]')
   else:
-    display('\t[ Error frozen time period in secs ]')
+    display('[ Error frozen time period in secs ]')
     return False
   if config['main']['maxtotaldatasizemb'] == str(splunkConfig.maxTotalDataSizeMB):
-    display('\t[ max Total Data Size Mb OK ]')
+    display('[ max Total Data Size Mb OK ]')
   else:
-    display('\t[ Error max Total Data Size Mb ]')
+    display('[ Error max Total Data Size Mb ]')
     return False
   if config['main']['rotateperiodinsecs'] == str(splunkConfig.rotatePeriodInSecs):
-    display('\t[ rotate period in secs OK ]')
+    display('[ rotate period in secs OK ]')
   else:
-    display('\t[ Error rotate period in secs]')
+    display('[ Error rotate period in secs]')
+    return False
+  if config['main']['thawedPath'] == splunkConfig.thawedPath:
+    display('[ thawedPath OK ]')
+  else:
+    display('[ Error thawedPath ]')
     return False
 
 def uploadConfig():
-  display(f'\t[ Upload Splunk Rotate Configuration ]')
+  display(f'[ Upload Splunk Rotate Configuration ]')
   try:
     stdout = subprocess.check_output(['scp','local.indexes.conf'\
           ,args.username+"@"+args.splunkIp+":"+splunkConfig.localConfigFile])
     if stdout.decode("utf8") == '':
-      display("\t[ Config Uploaded Successfully ]")
+      display("[ Config Uploaded Successfully ]")
     #else:
   except subprocess.CalledProcessError as e:
     display(e.output)
@@ -141,12 +161,12 @@ def removeOldSplunkLogs():
   decision = input("Are you sure to Remove Logs in {}?\n {} space will be freed\n This CANNOT be Undone\
             yes/no? (default: no), ans:".format(splunkConfig.coldToFrozenDir,size))
   if decision.lower() != 'yes':
-    display('\t [ No Logs Removed ]')
+    display(' [ No Logs Removed ]')
     return
   stdin, stdout, stderr = client.exec_command('sudo rm -rf "{}"*'\
                    .format(splunkConfig.coldToFrozenDir), get_pty=True)
   if stdout.read().decode("utf8") == '':
-    display('\t [ {} Frozen Splunk Logs Removed ]'.format(size))
+    display(' [ {} Frozen Splunk Logs Removed ]'.format(size))
   
 def main():
   if pullRemoteConfig() == False:
@@ -154,10 +174,10 @@ def main():
     uploadConfig()
     
   elif checkRemoteConfig() == False:
-    display("\t[ Config Error ]")
+    display("[ Config Error ]")
     addToRemoteConfig()
     uploadConfig()
-  display("\t[ All Config OK, Clean Up spaces ]")
+  display("[ All Config OK, Clean Up spaces ]")
   removeOldSplunkLogs()
 
 if __name__ == "__main__":
